@@ -1,0 +1,11 @@
+llm:
+  provider: deepseek
+  model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+  temperature: 0.8
+  max_tokens: 1024
+
+engine:
+  max_turns: 50
+  db_path: data/world.db
+  memory_retrieval_top_k: 6
