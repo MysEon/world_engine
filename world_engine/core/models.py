@@ -38,6 +38,7 @@ class MemoryRecord(BaseModel):
 
 
 class WorldState(BaseModel):
+    world_id: str = ""
     name: str
     setting: str = ""
     locations: list[str] = Field(default_factory=list)
@@ -53,3 +54,23 @@ class DirectorEvent(BaseModel):
     content: str = Field(..., description="What the creator does to the world")
     targets: list[str] = Field(default_factory=list, description="Characters who perceive it directly, empty = everyone")
     importance: int = Field(default=8, ge=1, le=10)
+
+
+class Chapter(BaseModel):
+    number: int
+    title: str = ""
+    summary: str = ""
+    start_turn: int = 0
+    end_turn: int = 0
+    content: str = ""
+    status: str = "outlined"
+
+
+class Novel(BaseModel):
+    """The finished product: a book distilled from the world's event stream."""
+
+    world_id: str
+    title: str = ""
+    arc: str = ""
+    chapters: list[Chapter] = Field(default_factory=list)
+    updated_at: str = Field(default_factory=utcnow)

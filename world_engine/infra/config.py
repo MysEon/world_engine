@@ -25,6 +25,8 @@ class EngineSettings(BaseModel):
     memory_retrieval_top_k: int = 6
     reflect_every: int = 5
     memory_archive_cutoff: int = 4
+    planner_max_events: int = 80
+    chapter_max_tokens: int = 2500
 
 
 class Settings(BaseModel):

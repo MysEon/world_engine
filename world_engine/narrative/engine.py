@@ -11,6 +11,7 @@ from ..infra.config import Settings
 from ..infra.llm import LLMClient
 from ..memory.reflection import Reflector
 from ..memory.retrieval import is_duplicate
+from ..novel.pipeline import NovelPipeline
 from .director import apply_director_event, memories_for_director_event
 from .narrator import Narrator
 from .perception import build_agent_perception, build_scene
@@ -54,6 +55,11 @@ class WorldEngine:
             window=self.reflect_every,
             archive_cutoff=settings.engine.memory_archive_cutoff,
         )
+        self.novel = NovelPipeline(
+            lambda: self.llm,
+            planner_max_events=settings.engine.planner_max_events,
+            chapter_max_tokens=settings.engine.chapter_max_tokens,
+        )
         self.graph = self._build_graph()
 
     # -- lifecycle -----------------------------------------------------------
@@ -62,6 +68,7 @@ class WorldEngine:
         state = self.store.load(self.world_id)
         if state is None:
             state = self._init_from_preset(preset)
+        state.world_id = self.world_id
         self.world = state
         self.agents = {c.name: CharacterAgent(c, self.llm) for c in state.characters}
         return state
@@ -78,6 +85,7 @@ class WorldEngine:
             for c in preset.get("characters", [])
         ]
         state = WorldState(
+            world_id=self.world_id,
             name=preset["name"],
             setting=preset.get("setting", ""),
             locations=locations,
@@ -206,3 +214,20 @@ class WorldEngine:
         event_log = [e.content for e in self.store.events(self.world_id, limit=8)]
         narrative = self.world.narrative[-1] if self.world.narrative else ""
         return StepResult(turn=turn, narrative=narrative, event_log=event_log)
+
+    # -- novel production ----------------------------------------------------
+
+    def plan_novel(self):
+        return self.novel.plan(self.world, self.store)
+
+    def write_novel(self, numbers: list[int] | None = None):
+        novel = self.store.load_novel(self.world_id)
+        if novel is None:
+            novel = self.novel.plan(self.world, self.store)
+        return self.novel.write(self.world, self.store, novel, numbers)
+
+    def export_novel(self) -> str:
+        novel = self.store.load_novel(self.world_id)
+        if novel is None:
+            novel = self.novel.plan(self.world, self.store)
+        return self.novel.export(novel)

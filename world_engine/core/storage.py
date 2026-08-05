@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from .models import MemoryRecord, WorldEvent, WorldState, utcnow
+from .models import MemoryRecord, Novel, WorldEvent, WorldState, utcnow
 
 
 class WorldStore:
@@ -52,6 +52,13 @@ class WorldStore:
                 created_at TEXT NOT NULL
             )"""
         )
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS novels (
+                world_id TEXT PRIMARY KEY,
+                novel_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
         self._migrate_memories(cur)
         self.conn.commit()
 
@@ -88,13 +95,21 @@ class WorldStore:
         )
         self.conn.commit()
 
-    def events(self, world_id: str, limit: int = 20) -> list[WorldEvent]:
-        rows = self.conn.execute(
-            """SELECT turn, kind, actor, content, created_at FROM events
-               WHERE world_id = ? ORDER BY id DESC LIMIT ?""",
-            (world_id, limit),
-        ).fetchall()
-        return [WorldEvent(**dict(r)) for r in reversed(rows)]
+    def events(self, world_id: str, limit: int | None = 20) -> list[WorldEvent]:
+        if limit is None:
+            rows = self.conn.execute(
+                """SELECT turn, kind, actor, content, created_at FROM events
+                   WHERE world_id = ? ORDER BY id""",
+                (world_id,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """SELECT turn, kind, actor, content, created_at FROM events
+                   WHERE world_id = ? ORDER BY id DESC LIMIT ?""",
+                (world_id, limit),
+            ).fetchall()
+            rows = list(reversed(rows))
+        return [WorldEvent(**dict(r)) for r in rows]
 
     def add_memories(self, world_id: str, records: list[MemoryRecord]) -> None:
         self.conn.executemany(
@@ -133,6 +148,24 @@ class WorldStore:
         self.conn.execute(
             f"UPDATE memories SET archived = 1 WHERE world_id = ? AND id IN ({placeholders})",
             [world_id, *ids],
+        )
+        self.conn.commit()
+
+    def load_novel(self, world_id: str) -> Novel | None:
+        row = self.conn.execute(
+            "SELECT novel_json FROM novels WHERE world_id = ?", (world_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return Novel.model_validate_json(row["novel_json"])
+
+    def save_novel(self, world_id: str, novel: Novel) -> None:
+        novel.updated_at = utcnow()
+        self.conn.execute(
+            """INSERT INTO novels (world_id, novel_json, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(world_id) DO UPDATE SET novel_json = excluded.novel_json,
+                                                   updated_at = excluded.updated_at""",
+            (world_id, novel.model_dump_json(), novel.updated_at),
         )
         self.conn.commit()
 

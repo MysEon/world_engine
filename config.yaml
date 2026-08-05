@@ -11,3 +11,5 @@ engine:
   memory_retrieval_top_k: 6
   reflect_every: 5
   memory_archive_cutoff: 4
+  planner_max_events: 80
+  chapter_max_tokens: 2500
