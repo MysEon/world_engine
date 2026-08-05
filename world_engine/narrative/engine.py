@@ -4,18 +4,16 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from .agents import AgentOutput, CharacterAgent
-from .config import Settings
-from .director import DirectorEvent, apply_director_event, memories_for_director_event
-from .llm import LLMClient
-from .world_state import Character, MemoryRecord, WorldEvent, WorldState, WorldStore
-
-NARRATOR_SYSTEM = """
-You are the world's narrator, a Chinese novelist. Given a turn's raw events from the story,
-write 2-4 sentences of flowing, literary prose in the third person. Do NOT reveal private
-thoughts of the characters in the prose; thoughts are interior. Render speech naturally
-inside quotes. Do not say "the narrator". Output only the prose, no headings.
-""".strip()
+from ..agents.character import AgentOutput, CharacterAgent
+from ..core.models import Character, DirectorEvent, MemoryRecord, WorldEvent, WorldState
+from ..core.storage import WorldStore
+from ..infra.config import Settings
+from ..infra.llm import LLMClient
+from ..memory.reflection import Reflector
+from ..memory.retrieval import is_duplicate
+from .director import apply_director_event, memories_for_director_event
+from .narrator import Narrator
+from .perception import build_agent_perception, build_scene
 
 
 class EngineState(TypedDict, total=False):
@@ -25,6 +23,7 @@ class EngineState(TypedDict, total=False):
     outputs: dict[str, AgentOutput]
     narrative: str
     scene: str
+    reflect_due: bool
 
 
 class StepResult:
@@ -35,13 +34,26 @@ class StepResult:
 
 
 class WorldEngine:
+    """Composition root: wires every subsystem into a single LangGraph turn pipeline.
+
+    This is the only module allowed to know about all others. Each subsystem
+    (memory, agents, narrative) stays decoupled from its siblings.
+    """
+
     def __init__(self, settings: Settings, world_id: str):
         self.settings = settings
         self.world_id = world_id
         self.store = WorldStore(settings.engine.db_path)
         self.llm = LLMClient(settings)
+        self.narrator = Narrator(lambda: self.llm)
         self.world: WorldState | None = None
         self.agents: dict[str, CharacterAgent] = {}
+        self.reflect_every = max(1, settings.engine.reflect_every)
+        self.reflector = Reflector(
+            lambda: self.llm,
+            window=self.reflect_every,
+            archive_cutoff=settings.engine.memory_archive_cutoff,
+        )
         self.graph = self._build_graph()
 
     # -- lifecycle -----------------------------------------------------------
@@ -55,19 +67,20 @@ class WorldEngine:
         return state
 
     def _init_from_preset(self, preset: dict[str, Any]) -> WorldState:
+        locations = preset.get("locations", [])
         chars = [
             Character(
                 name=c["name"],
                 role=c.get("role", "character"),
                 persona=c.get("persona", {}),
-                location=c.get("location", preset.get("locations", ["未知"])[0] if preset.get("locations") else "未知"),
+                location=c.get("location", locations[0] if locations else "未知"),
             )
             for c in preset.get("characters", [])
         ]
         state = WorldState(
             name=preset["name"],
             setting=preset.get("setting", ""),
-            locations=preset.get("locations", []),
+            locations=locations,
             characters=chars,
             turn=0,
             narrative=[],
@@ -93,13 +106,22 @@ class WorldEngine:
         g.add_node("act", self._act)
         g.add_node("narrate", self._narrate)
         g.add_node("persist", self._persist)
+        g.add_node("reflect", self._reflect)
         g.add_edge(START, "apply_director")
         g.add_edge("apply_director", "perceive")
         g.add_edge("perceive", "act")
         g.add_edge("act", "narrate")
         g.add_edge("narrate", "persist")
-        g.add_edge("persist", END)
+        g.add_conditional_edges(
+            "persist",
+            self._route_after_persist,
+            {"reflect": "reflect", "done": END},
+        )
+        g.add_edge("reflect", END)
         return g.compile()
+
+    def _route_after_persist(self, state: EngineState) -> str:
+        return "reflect" if state.get("reflect_due") else "done"
 
     def _apply_director(self, state: EngineState) -> dict[str, Any]:
         turn = self.current_turn()
@@ -111,21 +133,7 @@ class WorldEngine:
         return {}
 
     def _perceive(self, state: EngineState) -> dict[str, Any]:
-        turn = self.current_turn()
-        last = self.world.narrative[-1] if self.world.narrative else "此刻一切如常，平静的一天。"
-        scene_lines = [
-            f"时间：第 {turn} 回合",
-            f"地点：{'、'.join(self.world.locations) if self.world.locations else '未知'}",
-            "",
-            "此刻的状况：",
-            last,
-        ]
-        event = state.get("pending_event")
-        if event is not None:
-            scene_lines.append("")
-            scene_lines.append("【世界发生了异变】")
-            scene_lines.append(event.content)
-        return {"scene": "\n".join(scene_lines)}
+        return {"scene": build_scene(self.world, self.current_turn(), state.get("pending_event"))}
 
     def _act(self, state: EngineState) -> dict[str, Any]:
         turn = self.current_turn()
@@ -134,7 +142,7 @@ class WorldEngine:
         turn_log: list[str] = []
         for name, agent in self.agents.items():
             live = "\n".join(turn_log)
-            perception = scene + (("\n\n刚才在场的人：\n" + live) if live else "")
+            perception = build_agent_perception(scene, live)
             memories = self.store.memories(self.world_id, name)
             out = agent.act(self.world, turn, perception, memories)
             outputs[name] = out
@@ -151,15 +159,7 @@ class WorldEngine:
             if out.speech:
                 raw.append(f"{name} 说：{out.speech}")
             raw.append(f"{name} 行动：{out.action}")
-        turn = self.current_turn()
-        if not raw:
-            return {"narrative": ""}
-        messages = [
-            {"role": "system", "content": NARRATOR_SYSTEM},
-            {"role": "user", "content": f"第 {turn} 回合的原始事件：\n" + "\n".join(raw)},
-        ]
-        prose = self.llm.chat(messages, max_tokens=400, temperature=0.9).strip()
-        return {"narrative": prose}
+        return {"narrative": self.narrator.narrate(self.current_turn(), raw)}
 
     def _persist(self, state: EngineState) -> dict[str, Any]:
         turn = self.current_turn()
@@ -173,13 +173,23 @@ class WorldEngine:
             if out.speech:
                 self.store.add_event(self.world_id, WorldEvent(turn=turn, kind="speech", actor=name, content=out.speech))
             self.store.add_event(self.world_id, WorldEvent(turn=turn, kind="action", actor=name, content=out.action))
+            existing = self.store.memories(self.world_id, name)
             for m in out.memories:
+                content = m.get("content", "")
+                if not content or is_duplicate(content, existing):
+                    continue
                 importance = int(m.get("importance", 4))
-                memories.append(MemoryRecord(character=name, content=m.get("content", ""), importance=max(1, min(10, importance)), turn=turn))
+                memories.append(MemoryRecord(character=name, content=content, importance=max(1, min(10, importance)), turn=turn))
         if memories:
             self.store.add_memories(self.world_id, memories)
         self.world.turn = turn
         self.store.save(self.world_id, self.world)
+        return {"reflect_due": turn % self.reflect_every == 0}
+
+    def _reflect(self, state: EngineState) -> dict[str, Any]:
+        completed_turn = self.world.turn
+        for name in self.agents:
+            self.reflector.run(self.store, self.world_id, name, completed_turn)
         return {}
 
     # -- public API ----------------------------------------------------------

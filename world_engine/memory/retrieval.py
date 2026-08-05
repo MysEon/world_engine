@@ -4,7 +4,7 @@ import math
 import re
 from collections import Counter
 
-from .world_state import MemoryRecord
+from ..core.models import MemoryRecord
 
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+|[^\s\W]")
 _ALPHA_RE = re.compile(r"[a-zA-Z]")
@@ -34,6 +34,16 @@ def _jaccard(a: list[str], b: list[str]) -> float:
 def relevance(query: str, content: str) -> float:
     """Character bigram Jaccard similarity between query and memory content."""
     return _jaccard(_ngrams(query), _ngrams(content))
+
+
+def is_duplicate(content: str, memories: list[MemoryRecord], threshold: float = 0.55) -> bool:
+    """True if a similar memory was already recorded (write-time consolidation)."""
+    for m in memories:
+        if m.archived:
+            continue
+        if relevance(content, m.content) >= threshold:
+            return True
+    return False
 
 
 def recency_score(turns_ago: int, decay: float = 0.12) -> float:

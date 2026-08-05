@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from world_engine.director import DirectorEvent, apply_director_event, memories_for_director_event
-from world_engine.graph import WorldEngine
-from world_engine.world_state import Character, WorldState
+from world_engine.core.models import Character, DirectorEvent, WorldState
+from world_engine.narrative.director import apply_director_event, memories_for_director_event
+from world_engine.narrative.engine import WorldEngine
 
 
 class FakeLLM:
@@ -26,7 +26,7 @@ class FakeLLM:
 
 
 def make_engine(tmp_path: Path, llm: FakeLLM | None = None) -> WorldEngine:
-    from world_engine.config import EngineSettings, LLMSettings, Settings
+    from world_engine.infra.config import EngineSettings, LLMSettings, Settings
 
     settings = Settings(
         llm=LLMSettings(provider="fake", model="fake", api_key_env="", base_url="http://x"),
@@ -77,3 +77,58 @@ def test_director_event_helpers():
     assert events[0].kind == "director"
     memories = memories_for_director_event(state, event, turn=5)
     assert [m.character for m in memories] == ["甲"]
+
+
+def test_write_time_dedup(tmp_path: Path):
+    engine = make_engine(tmp_path)
+    engine.step()
+    engine.step()
+    mems = engine.store.memories("test-world", "沈雁")
+    assert sum(1 for m in mems if "生面孔" in m.content) == 1
+
+
+class ReflectFakeLLM(FakeLLM):
+    def chat_json(self, messages, **kwargs):
+        if "记忆片段" in messages[-1]["content"]:
+            return {"reflections": [{"content": "他对陌生人的警惕在加深", "importance": 9}]}
+        return super().chat_json(messages, **kwargs)
+
+
+def make_reflecting_engine(tmp_path: Path):
+    from world_engine.infra.config import EngineSettings, LLMSettings, Settings
+
+    settings = Settings(
+        llm=LLMSettings(provider="fake", model="fake", api_key_env="", base_url="http://x"),
+        engine=EngineSettings(db_path=tmp_path / "test.db", reflect_every=1),
+    )
+    engine = WorldEngine(settings, "test-world")
+    engine.llm = ReflectFakeLLM(with_memories=True)  # type: ignore[assignment]
+    engine.load_world(
+        {
+            "name": "测试茶馆",
+            "setting": "一处江湖茶馆。",
+            "locations": ["大堂"],
+            "characters": [
+                {"name": "沈雁", "role": "剑客", "persona": {"core": "寡言"}},
+                {"name": "阿蛮", "role": "少年", "persona": {"core": "热血"}},
+            ],
+        }
+    )
+    return engine
+
+
+def test_reflection_and_archiving(tmp_path: Path):
+    from world_engine.core.models import MemoryRecord
+
+    engine = make_reflecting_engine(tmp_path)
+    engine.store.add_memories(
+        "test-world",
+        [MemoryRecord(character="沈雁", content="屋檐下的一只旧瓦罐", importance=3, turn=0)],
+    )
+    engine.step()
+
+    all_mems = engine.store.memories("test-world", "沈雁", include_archived=True)
+    assert any(m.kind == "reflection" and "警惕" in m.content for m in all_mems)
+    assert any(m.archived and m.importance == 3 for m in all_mems)
+    active = engine.store.memories("test-world", "沈雁")
+    assert not any(m.importance == 3 for m in active)

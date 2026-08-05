@@ -1,7 +1,7 @@
 import pytest
 
-from world_engine.memory import relevance, retrieve
-from world_engine.world_state import MemoryRecord
+from world_engine.core.models import MemoryRecord
+from world_engine.memory.retrieval import relevance, retrieve
 
 
 def test_relevance_cjk_shares_grams():

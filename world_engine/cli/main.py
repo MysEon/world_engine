@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .config import load_settings
-from .director import DirectorEvent
-from .graph import WorldEngine
+from ..core.models import DirectorEvent
+from ..infra.config import load_settings
+from ..narrative.engine import WorldEngine
 
 HELP = """
 命令（输入后回车）：

@@ -9,3 +9,5 @@ engine:
   max_turns: 50
   db_path: data/world.db
   memory_retrieval_top_k: 6
+  reflect_every: 5
+  memory_archive_cutoff: 4

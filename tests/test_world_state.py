@@ -1,12 +1,7 @@
 from pathlib import Path
 
-from world_engine.world_state import (
-    Character,
-    MemoryRecord,
-    WorldEvent,
-    WorldState,
-    WorldStore,
-)
+from world_engine.core.models import Character, MemoryRecord, WorldEvent, WorldState
+from world_engine.core.storage import WorldStore
 
 
 def test_store_roundtrip(tmp_path: Path):

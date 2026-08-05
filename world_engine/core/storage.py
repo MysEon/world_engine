@@ -1,53 +1,17 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from pydantic import BaseModel, Field
-
-
-def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class Character(BaseModel):
-    name: str
-    role: str = "character"
-    persona: dict[str, Any] = Field(default_factory=dict)
-    location: str = "unknown"
-    status: dict[str, Any] = Field(default_factory=dict)
-
-
-class WorldEvent(BaseModel):
-    turn: int
-    kind: str
-    actor: str | None = None
-    content: str
-    created_at: str = Field(default_factory=utcnow)
-
-
-class MemoryRecord(BaseModel):
-    character: str
-    content: str
-    importance: int = Field(default=3, ge=1, le=10)
-    turn: int = 0
-    created_at: str = Field(default_factory=utcnow)
-
-
-class WorldState(BaseModel):
-    name: str
-    setting: str = ""
-    locations: list[str] = Field(default_factory=list)
-    characters: list[Character] = Field(default_factory=list)
-    turn: int = 0
-    narrative: list[str] = Field(default_factory=list)
-    updated_at: str = Field(default_factory=utcnow)
+from .models import MemoryRecord, WorldEvent, WorldState, utcnow
 
 
 class WorldStore:
-    """SQLite persistence for world state, event log, and memory streams."""
+    """SQLite persistence for world state, event log, and memory streams.
+
+    Depends only on core.models; swap out for another backend behind the same
+    method surface if the project outgrows SQLite.
+    """
 
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,10 +47,20 @@ class WorldStore:
                 content TEXT NOT NULL,
                 importance INTEGER NOT NULL,
                 turn INTEGER NOT NULL,
+                kind TEXT DEFAULT 'event',
+                archived INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL
             )"""
         )
+        self._migrate_memories(cur)
         self.conn.commit()
+
+    def _migrate_memories(self, cur: sqlite3.Cursor) -> None:
+        cols = {r["name"] for r in cur.execute("PRAGMA table_info(memories)").fetchall()}
+        if "kind" not in cols:
+            cur.execute("ALTER TABLE memories ADD COLUMN kind TEXT DEFAULT 'event'")
+        if "archived" not in cols:
+            cur.execute("ALTER TABLE memories ADD COLUMN archived INTEGER DEFAULT 0")
 
     def load(self, world_id: str) -> WorldState | None:
         row = self.conn.execute(
@@ -124,22 +98,43 @@ class WorldStore:
 
     def add_memories(self, world_id: str, records: list[MemoryRecord]) -> None:
         self.conn.executemany(
-            """INSERT INTO memories (world_id, character, content, importance, turn, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO memories (world_id, character, content, importance, turn, kind, archived, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                (world_id, r.character, r.content, r.importance, r.turn, r.created_at)
+                (
+                    world_id,
+                    r.character,
+                    r.content,
+                    r.importance,
+                    r.turn,
+                    r.kind,
+                    1 if r.archived else 0,
+                    r.created_at,
+                )
                 for r in records
             ],
         )
         self.conn.commit()
 
-    def memories(self, world_id: str, character: str) -> list[MemoryRecord]:
-        rows = self.conn.execute(
-            """SELECT character, content, importance, turn, created_at FROM memories
-               WHERE world_id = ? AND character = ? ORDER BY id""",
-            (world_id, character),
-        ).fetchall()
+    def memories(self, world_id: str, character: str, include_archived: bool = False) -> list[MemoryRecord]:
+        query = (
+            """SELECT id, character, content, importance, turn, kind, archived, created_at
+               FROM memories WHERE world_id = ? AND character = ?"""
+            + ("" if include_archived else " AND archived = 0")
+            + " ORDER BY id"
+        )
+        rows = self.conn.execute(query, (world_id, character)).fetchall()
         return [MemoryRecord(**dict(r)) for r in rows]
+
+    def archive(self, world_id: str, ids: list[int]) -> None:
+        if not ids:
+            return
+        placeholders = ",".join("?" * len(ids))
+        self.conn.execute(
+            f"UPDATE memories SET archived = 1 WHERE world_id = ? AND id IN ({placeholders})",
+            [world_id, *ids],
+        )
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()

@@ -4,9 +4,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .llm import LLMClient
-from .memory import retrieve
-from .world_state import Character, MemoryRecord, WorldState
+from ..core.models import Character, MemoryRecord, WorldState
+from ..infra.llm import LLMClient
+from ..memory.retrieval import retrieve
 
 AGENT_OUTPUT_CONTRACT = """
 You MUST reply with a single JSON object, exactly this shape:
@@ -52,7 +52,6 @@ You only know what your own memories and the current scene tell you. Respond as 
 
     def perception_block(
         self,
-        world: WorldState,
         current_turn: int,
         perception: str,
         memories: list[MemoryRecord],
@@ -78,7 +77,7 @@ WHAT YOU REMEMBER (recalled just now):
             {"role": "system", "content": self.system_prompt(world)},
             {
                 "role": "user",
-                "content": self.perception_block(world, current_turn, perception, memories)
+                "content": self.perception_block(current_turn, perception, memories)
                 + "\n\n"
                 + "Decide what you do and say right now. "
                 + AGENT_OUTPUT_CONTRACT,

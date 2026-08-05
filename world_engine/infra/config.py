@@ -23,6 +23,8 @@ class EngineSettings(BaseModel):
     max_turns: int = 50
     db_path: Path = Field(default_factory=lambda: Path("data/world.db"))
     memory_retrieval_top_k: int = 6
+    reflect_every: int = 5
+    memory_archive_cutoff: int = 4
 
 
 class Settings(BaseModel):
