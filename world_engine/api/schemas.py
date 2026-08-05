@@ -76,6 +76,30 @@ class WriteRequest(BaseModel):
     chapters: list[int] | None = None
 
 
+class LLMSettingsRequest(BaseModel):
+    provider: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+
+
+class LLMSettingsResponse(BaseModel):
+    provider: str
+    base_url: str
+    model: str
+    api_key_set: bool
+
+
+class LLMTestRequest(LLMSettingsRequest):
+    pass
+
+
+class LLMTestResponse(BaseModel):
+    ok: bool
+    latency_ms: float
+    model: str
+
+
 def to_world_summary(world_id: str, world) -> WorldSummary:
     return WorldSummary(
         world_id=world_id,

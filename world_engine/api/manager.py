@@ -3,6 +3,7 @@ from __future__ import annotations
 from ..core.storage import WorldStore
 from ..infra.config import Settings
 from ..infra.llm import LLMClient
+from ..infra.llm_settings import LLMSettingsStore
 from ..infra.preset import load_preset
 from ..narrative.engine import WorldEngine
 
@@ -15,11 +16,15 @@ class WorldManager:
         self._llm = llm
         self._engines: dict[str, WorldEngine] = {}
         self._store = WorldStore(settings.engine.db_path)
+        self.llm_store = LLMSettingsStore(
+            settings.engine.db_path.parent / "llm_settings.json",
+            settings.llm,
+        )
 
     def get(self, world_id: str, preset_path: str | None = None) -> WorldEngine:
         engine = self._engines.get(world_id)
         if engine is None:
-            engine = WorldEngine(self.settings, world_id)
+            engine = WorldEngine(self.settings, world_id, llm_store=self.llm_store)
             if self._llm is not None:
                 engine.llm = self._llm
             engine.load_world(load_preset(preset_path or self.settings.server.default_preset))

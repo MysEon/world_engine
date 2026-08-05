@@ -3,10 +3,17 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
 
+from ..infra.llm import _sanitize, test_llm_connection
+from ..infra.llm_settings import RuntimeLLMConfig, build_effective
+from ..infra.logging import get_logger
 from .manager import WorldManager
 from .schemas import (
     AgentView,
     CreateWorldRequest,
+    LLMSettingsRequest,
+    LLMSettingsResponse,
+    LLMTestRequest,
+    LLMTestResponse,
     NovelView,
     StepRequest,
     StepResponse,
@@ -15,6 +22,8 @@ from .schemas import (
     to_novel_view,
     to_world_summary,
 )
+
+logger = get_logger("api")
 
 router = APIRouter()
 
@@ -99,3 +108,49 @@ def export_novel(world_id: str, request: Request):
     manager = _manager(request)
     markdown = manager.get(world_id).export_novel()
     return Response(content=markdown, media_type="text/markdown; charset=utf-8")
+
+
+# -- LLM settings -------------------------------------------------------------
+
+
+@router.get("/settings/llm", response_model=LLMSettingsResponse)
+def get_llm_settings(request: Request):
+    store = request.app.state.llm_store
+    return LLMSettingsResponse(**store.public())
+
+
+@router.put("/settings/llm", response_model=LLMSettingsResponse)
+def put_llm_settings(request: Request, body: LLMSettingsRequest):
+    store = request.app.state.llm_store
+    patch = RuntimeLLMConfig(
+        provider=body.provider,
+        base_url=body.base_url,
+        model=body.model,
+        api_key=body.api_key,
+    )
+    public = store.update(patch)
+    logger.info(
+        "llm_settings_updated",
+        provider=public["provider"],
+        base_url=public["base_url"],
+        model=public["model"],
+        key_changed=body.api_key is not None,
+    )
+    return LLMSettingsResponse(**public)
+
+
+@router.post("/settings/llm/test", response_model=LLMTestResponse)
+def test_llm_settings(request: Request, body: LLMTestRequest):
+    defaults = request.app.state.settings.llm
+    cfg = RuntimeLLMConfig(
+        provider=body.provider,
+        base_url=body.base_url,
+        model=body.model,
+        api_key=body.api_key,
+    )
+    eff = build_effective(cfg, defaults)
+    try:
+        model, latency_ms = test_llm_connection(eff)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=_sanitize(str(exc), eff.api_key)) from exc
+    return LLMTestResponse(ok=True, latency_ms=latency_ms, model=model)

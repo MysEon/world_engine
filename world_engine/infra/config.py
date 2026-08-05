@@ -53,6 +53,7 @@ PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "openai/gpt-4o-mini", "api_key_env": "OPENROUTER_API_KEY"},
     "ollama": {"base_url": "http://localhost:11434/v1", "model": "qwen2.5:7b", "api_key_env": ""},
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "model": "gemini-2.5-flash", "api_key_env": "GEMINI_API_KEY"},
+    "qwen": {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus", "api_key_env": "DASHSCOPE_API_KEY"},
 }
 
 

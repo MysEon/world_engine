@@ -145,8 +145,13 @@ export   → 得到一本《荒山茶馆》的 Markdown 书
 | POST | `/api/worlds/{id}/novel/write` | 撰写章节（body 可选 `{chapters: [1,2]}`） |
 | GET | `/api/worlds/{id}/novel` | 当前小说 |
 | GET | `/api/worlds/{id}/novel/export` | 导出 Markdown |
+| PUT | `/api/settings/llm` | 保存 LLM 配置（热生效，`api_key` 可省略） |
+| GET | `/api/settings/llm` | 读取当前 LLM 配置（`api_key` 只回传 `api_key_set`） |
+| POST | `/api/settings/llm/test` | 测试 LLM 连接（不发请求内容，返回 `{ok, latency_ms, model}`） |
 
 step 响应即创世神视图：每个 agent 的 `thought` / `speech` / `action` / `memories`。
+
+**LLM 配置优先级**：运行中保存的配置 > 环境变量默认值 > 报错。配置持久化在 `data/llm_settings.json`，重启后仍生效。
 
 ---
 

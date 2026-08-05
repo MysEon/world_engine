@@ -9,6 +9,7 @@ from ..core.models import Character, DirectorEvent, MemoryRecord, WorldEvent, Wo
 from ..core.storage import WorldStore
 from ..infra.config import Settings
 from ..infra.llm import LLMClient
+from ..infra.llm_settings import LLMSettingsStore
 from ..infra.logging import get_logger
 from ..memory.reflection import Reflector
 from ..memory.retrieval import is_duplicate
@@ -46,11 +47,16 @@ class WorldEngine:
     (memory, agents, narrative) stays decoupled from its siblings.
     """
 
-    def __init__(self, settings: Settings, world_id: str):
+    def __init__(self, settings: Settings, world_id: str, llm_store: LLMSettingsStore | None = None):
         self.settings = settings
         self.world_id = world_id
         self.store = WorldStore(settings.engine.db_path)
-        self.llm = LLMClient(settings)
+        if llm_store is None:
+            llm_store = LLMSettingsStore(
+                settings.engine.db_path.parent / "llm_settings.json",
+                settings.llm,
+            )
+        self.llm = LLMClient(llm_store)
         self.narrator = Narrator(lambda: self.llm)
         self.world: WorldState | None = None
         self.agents: dict[str, CharacterAgent] = {}
