@@ -4,14 +4,18 @@ version = "0.1.0"
 description = "A multi-agent world simulation engine for generative storytelling"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.141.1",
     "langgraph>=1.2.10",
     "openai>=2.53.0",
     "pydantic>=2.13.4",
     "pyyaml>=6.0.3",
+    "structlog>=26.1.0",
+    "uvicorn>=0.52.1",
 ]
 
 [project.scripts]
 world-engine = "world_engine.cli:main"
+world-engine-api = "world_engine.api.app:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -130,6 +130,38 @@ export   → 得到一本《荒山茶馆》的 Markdown 书
 
 ---
 
+## 🌐 HTTP API
+
+以 FastAPI 后端运行（`uv run world-engine-api`，默认 `http://127.0.0.1:8000`，交互文档在 `/docs`）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/worlds` | 创建/加载世界（body: `{world_id, preset_path?}`） |
+| GET | `/api/worlds` | 列出所有世界 |
+| GET | `/api/worlds/{id}` | 世界状态 |
+| POST | `/api/worlds/{id}/step` | 推进一回合（body 可选 `{event: {content, targets}}`） |
+| GET | `/api/worlds/{id}/history` | 事件流（含内心独白） |
+| POST | `/api/worlds/{id}/novel/plan` | 生成小说大纲 |
+| POST | `/api/worlds/{id}/novel/write` | 撰写章节（body 可选 `{chapters: [1,2]}`） |
+| GET | `/api/worlds/{id}/novel` | 当前小说 |
+| GET | `/api/worlds/{id}/novel/export` | 导出 Markdown |
+
+step 响应即创世神视图：每个 agent 的 `thought` / `speech` / `action` / `memories`。
+
+---
+
+## 🪵 日志
+
+基于 **structlog**（结构化日志）：每回合 `step_start`/`step_done`、导演注入、小说撰写、LLM 错误、HTTP 请求都输出为结构化事件。开发用彩色控制台，生产切 JSON：
+
+```yaml
+logging:
+  level: INFO
+  json_output: false   # true = JSON 输出
+```
+
+---
+
 ## 🗺 预设世界
 
 ### 《荒山茶馆》

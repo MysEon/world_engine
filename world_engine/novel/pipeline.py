@@ -5,9 +5,12 @@ from typing import Callable
 from ..core.models import Novel, WorldEvent, WorldState
 from ..core.storage import WorldStore
 from ..infra.llm import LLMClient
+from ..infra.logging import get_logger
 from .editor import ChapterEditor
 from .planner import NovelPlanner
 from .writer import ChapterWriter
+
+logger = get_logger("novel")
 
 
 class NovelPipeline:
@@ -31,6 +34,12 @@ class NovelPipeline:
         events = store.events(world.world_id, limit=None)
         novel = self.planner.plan(world, events)
         store.save_novel(world.world_id, novel)
+        logger.info(
+            "novel_plan",
+            world_id=world.world_id,
+            title=novel.title,
+            chapters=len(novel.chapters),
+        )
         return novel
 
     def write(self, world: WorldState, store: WorldStore, novel: Novel, numbers: list[int] | None = None) -> Novel:
@@ -41,6 +50,13 @@ class NovelPipeline:
             polished = self.editor.edit(world, chapter, events, draft)
             chapter.content = polished
             chapter.status = "edited"
+            logger.info(
+                "novel_chapter",
+                world_id=world.world_id,
+                chapter=chapter.number,
+                title=chapter.title,
+                chars=len(polished),
+            )
         store.save_novel(world.world_id, novel)
         return novel
 

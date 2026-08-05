@@ -13,3 +13,12 @@ engine:
   memory_archive_cutoff: 4
   planner_max_events: 80
   chapter_max_tokens: 2500
+
+server:
+  host: 127.0.0.1
+  port: 8000
+  default_preset: presets/tavern.yaml
+
+logging:
+  level: INFO
+  json: false

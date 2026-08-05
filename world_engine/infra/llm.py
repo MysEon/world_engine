@@ -6,6 +6,9 @@ from typing import Any
 from openai import OpenAI
 
 from .config import LLMSettings, Settings, api_key_for
+from .logging import get_logger
+
+logger = get_logger("llm")
 
 DEFAULT_SYSTEM = "You are a helpful assistant."
 
@@ -54,6 +57,7 @@ class LLMClient:
         try:
             resp = self.client.chat.completions.create(**kwargs)
         except Exception as exc:  # noqa: BLE001
+            logger.error("llm_error", provider=cfg.provider, model=cfg.model, error=str(exc))
             raise LLMError(f"LLM call failed ({cfg.provider}): {exc}") from exc
         return resp.choices[0].message.content or ""
 

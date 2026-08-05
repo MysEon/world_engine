@@ -9,12 +9,15 @@ from ..core.models import Character, DirectorEvent, MemoryRecord, WorldEvent, Wo
 from ..core.storage import WorldStore
 from ..infra.config import Settings
 from ..infra.llm import LLMClient
+from ..infra.logging import get_logger
 from ..memory.reflection import Reflector
 from ..memory.retrieval import is_duplicate
 from ..novel.pipeline import NovelPipeline
 from .director import apply_director_event, memories_for_director_event
 from .narrator import Narrator
 from .perception import build_agent_perception, build_scene
+
+logger = get_logger("engine")
 
 
 class EngineState(TypedDict, total=False):
@@ -137,6 +140,13 @@ class WorldEngine:
         turn = self.current_turn()
         event = state.get("pending_event")
         if event is not None:
+            logger.info(
+                "director_inject",
+                world_id=self.world_id,
+                turn=turn,
+                targets=event.targets or "all",
+                content=event.content,
+            )
             for ev in apply_director_event(self.world, event, turn):
                 self.store.add_event(self.world_id, ev)
             self.store.add_memories(self.world_id, memories_for_director_event(self.world, event, turn))
@@ -201,13 +211,27 @@ class WorldEngine:
     def _reflect(self, state: EngineState) -> dict[str, Any]:
         completed_turn = self.world.turn
         for name in self.agents:
-            self.reflector.run(self.store, self.world_id, name, completed_turn)
+            summary = self.reflector.run(self.store, self.world_id, name, completed_turn)
+            logger.debug(
+                "reflection",
+                world_id=self.world_id,
+                character=name,
+                turn=completed_turn,
+                reflections=summary["reflections"],
+                archived=summary["archived"],
+            )
         return {}
 
     # -- public API ----------------------------------------------------------
 
     def step(self, director_event: DirectorEvent | None = None) -> StepResult:
         turn = self.current_turn()
+        logger.info(
+            "step_start",
+            world_id=self.world_id,
+            turn=turn,
+            director=bool(director_event),
+        )
         state = self.graph.invoke(
             {
                 "world_id": self.world_id,
@@ -218,6 +242,13 @@ class WorldEngine:
         outputs: dict[str, AgentOutput] = state.get("outputs", {})
         event_log = [e.content for e in self.store.events(self.world_id, limit=8)]
         narrative = self.world.narrative[-1] if self.world.narrative else ""
+        logger.info(
+            "step_done",
+            world_id=self.world_id,
+            turn=turn,
+            agents=len(outputs),
+            narrative_chars=len(narrative),
+        )
         return StepResult(turn=turn, narrative=narrative, event_log=event_log, outputs=outputs)
 
     # -- novel production ----------------------------------------------------

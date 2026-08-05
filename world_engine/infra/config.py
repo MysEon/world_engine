@@ -29,9 +29,22 @@ class EngineSettings(BaseModel):
     chapter_max_tokens: int = 2500
 
 
+class ServerSettings(BaseModel):
+    host: str = "127.0.0.1"
+    port: int = 8000
+    default_preset: str = "presets/tavern.yaml"
+
+
+class LoggingSettings(BaseModel):
+    level: str = "INFO"
+    json_output: bool = False
+
+
 class Settings(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     engine: EngineSettings = Field(default_factory=EngineSettings)
+    server: ServerSettings = Field(default_factory=ServerSettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
 PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
@@ -69,7 +82,15 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
         base = path.resolve().parent
         engine.db_path = base / engine.db_path
 
-    return Settings(llm=llm, engine=engine)
+    server_cfg = data.get("server", {}) or {}
+    server = ServerSettings(**server_cfg)
+    if not Path(server.default_preset).is_absolute():
+        server.default_preset = str(base / server.default_preset)
+
+    logging_cfg = data.get("logging", {}) or {}
+    logging_settings = LoggingSettings(**logging_cfg)
+
+    return Settings(llm=llm, engine=engine, server=server, logging=logging_settings)
 
 
 def api_key_for(settings: Settings) -> str | None:

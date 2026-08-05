@@ -8,6 +8,8 @@ from pathlib import Path
 
 from ..core.models import DirectorEvent
 from ..infra.config import load_settings
+from ..infra.logging import configure_logging
+from ..infra.preset import load_preset
 from ..narrative.engine import WorldEngine
 
 HELP = """
@@ -97,6 +99,7 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = load_settings(args.config)
+    configure_logging(settings.logging.level, settings.logging.json_output)
     _ensure_api_key(settings)
     engine = WorldEngine(settings, args.world)
     engine.load_world(_load_preset(args.preset))
@@ -179,16 +182,13 @@ def main() -> None:
 
 
 def _load_preset(path: str | None) -> dict:
-    import yaml
-    from pathlib import Path
-
     if path is None:
         path = "presets/tavern.yaml"
-    p = Path(path)
-    if not p.exists():
-        print(f"错误：找不到预设文件 {p}", file=sys.stderr)
+    try:
+        return load_preset(path)
+    except FileNotFoundError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
         raise SystemExit(1)
-    return yaml.safe_load(p.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

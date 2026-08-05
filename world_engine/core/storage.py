@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 from .models import MemoryRecord, Novel, WorldEvent, WorldState, utcnow
@@ -11,13 +12,21 @@ class WorldStore:
 
     Depends only on core.models; swap out for another backend behind the same
     method surface if the project outgrows SQLite.
+
+    Thread-safe: the connection is opened with check_same_thread=False and every
+    operation is guarded by a re-entrant lock, so FastAPI's threadpool can use it.
+    WAL mode allows multiple connections (per-engine) to share the DB file safely.
     """
 
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(path))
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self._init_db()
+        with self._lock:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA busy_timeout=5000")
+            self._init_db()
 
     def _init_db(self) -> None:
         cur = self.conn.cursor()
@@ -70,66 +79,76 @@ class WorldStore:
             cur.execute("ALTER TABLE memories ADD COLUMN archived INTEGER DEFAULT 0")
 
     def load(self, world_id: str) -> WorldState | None:
-        row = self.conn.execute(
-            "SELECT state_json FROM worlds WHERE id = ?", (world_id,)
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT state_json FROM worlds WHERE id = ?", (world_id,)
+            ).fetchone()
         if row is None:
             return None
         return WorldState.model_validate_json(row["state_json"])
 
+    def list_worlds(self) -> list[str]:
+        with self._lock:
+            rows = self.conn.execute("SELECT id FROM worlds ORDER BY id").fetchall()
+        return [r["id"] for r in rows]
+
     def save(self, world_id: str, state: WorldState) -> None:
-        state.updated_at = utcnow()
-        self.conn.execute(
-            """INSERT INTO worlds (id, state_json, updated_at) VALUES (?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json,
-                                             updated_at = excluded.updated_at""",
-            (world_id, state.model_dump_json(), state.updated_at),
-        )
-        self.conn.commit()
+        with self._lock:
+            state.updated_at = utcnow()
+            self.conn.execute(
+                """INSERT INTO worlds (id, state_json, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json,
+                                                 updated_at = excluded.updated_at""",
+                (world_id, state.model_dump_json(), state.updated_at),
+            )
+            self.conn.commit()
 
     def add_event(self, world_id: str, event: WorldEvent) -> None:
-        self.conn.execute(
-            """INSERT INTO events (world_id, turn, kind, actor, content, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (world_id, event.turn, event.kind, event.actor, event.content, event.created_at),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                """INSERT INTO events (world_id, turn, kind, actor, content, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (world_id, event.turn, event.kind, event.actor, event.content, event.created_at),
+            )
+            self.conn.commit()
 
     def events(self, world_id: str, limit: int | None = 20) -> list[WorldEvent]:
-        if limit is None:
-            rows = self.conn.execute(
-                """SELECT turn, kind, actor, content, created_at FROM events
-                   WHERE world_id = ? ORDER BY id""",
-                (world_id,),
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                """SELECT turn, kind, actor, content, created_at FROM events
-                   WHERE world_id = ? ORDER BY id DESC LIMIT ?""",
-                (world_id, limit),
-            ).fetchall()
-            rows = list(reversed(rows))
+        with self._lock:
+            if limit is None:
+                rows = self.conn.execute(
+                    """SELECT turn, kind, actor, content, created_at FROM events
+                       WHERE world_id = ? ORDER BY id""",
+                    (world_id,),
+                ).fetchall()
+            else:
+                rows = self.conn.execute(
+                    """SELECT turn, kind, actor, content, created_at FROM events
+                       WHERE world_id = ? ORDER BY id DESC LIMIT ?""",
+                    (world_id, limit),
+                ).fetchall()
+                rows = list(reversed(rows))
         return [WorldEvent(**dict(r)) for r in rows]
 
     def add_memories(self, world_id: str, records: list[MemoryRecord]) -> None:
-        self.conn.executemany(
-            """INSERT INTO memories (world_id, character, content, importance, turn, kind, archived, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            [
-                (
-                    world_id,
-                    r.character,
-                    r.content,
-                    r.importance,
-                    r.turn,
-                    r.kind,
-                    1 if r.archived else 0,
-                    r.created_at,
-                )
-                for r in records
-            ],
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.executemany(
+                """INSERT INTO memories (world_id, character, content, importance, turn, kind, archived, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        world_id,
+                        r.character,
+                        r.content,
+                        r.importance,
+                        r.turn,
+                        r.kind,
+                        1 if r.archived else 0,
+                        r.created_at,
+                    )
+                    for r in records
+                ],
+            )
+            self.conn.commit()
 
     def memories(self, world_id: str, character: str, include_archived: bool = False) -> list[MemoryRecord]:
         query = (
@@ -138,36 +157,41 @@ class WorldStore:
             + ("" if include_archived else " AND archived = 0")
             + " ORDER BY id"
         )
-        rows = self.conn.execute(query, (world_id, character)).fetchall()
+        with self._lock:
+            rows = self.conn.execute(query, (world_id, character)).fetchall()
         return [MemoryRecord(**dict(r)) for r in rows]
 
     def archive(self, world_id: str, ids: list[int]) -> None:
         if not ids:
             return
         placeholders = ",".join("?" * len(ids))
-        self.conn.execute(
-            f"UPDATE memories SET archived = 1 WHERE world_id = ? AND id IN ({placeholders})",
-            [world_id, *ids],
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                f"UPDATE memories SET archived = 1 WHERE world_id = ? AND id IN ({placeholders})",
+                [world_id, *ids],
+            )
+            self.conn.commit()
 
     def load_novel(self, world_id: str) -> Novel | None:
-        row = self.conn.execute(
-            "SELECT novel_json FROM novels WHERE world_id = ?", (world_id,)
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT novel_json FROM novels WHERE world_id = ?", (world_id,)
+            ).fetchone()
         if row is None:
             return None
         return Novel.model_validate_json(row["novel_json"])
 
     def save_novel(self, world_id: str, novel: Novel) -> None:
-        novel.updated_at = utcnow()
-        self.conn.execute(
-            """INSERT INTO novels (world_id, novel_json, updated_at) VALUES (?, ?, ?)
-               ON CONFLICT(world_id) DO UPDATE SET novel_json = excluded.novel_json,
-                                                   updated_at = excluded.updated_at""",
-            (world_id, novel.model_dump_json(), novel.updated_at),
-        )
-        self.conn.commit()
+        with self._lock:
+            novel.updated_at = utcnow()
+            self.conn.execute(
+                """INSERT INTO novels (world_id, novel_json, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(world_id) DO UPDATE SET novel_json = excluded.novel_json,
+                                                       updated_at = excluded.updated_at""",
+                (world_id, novel.model_dump_json(), novel.updated_at),
+            )
+            self.conn.commit()
 
     def close(self) -> None:
-        self.conn.close()
+        with self._lock:
+            self.conn.close()
