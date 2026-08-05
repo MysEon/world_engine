@@ -142,3 +142,76 @@ def test_hot_reload_uses_runtime_config(tmp_path: Path):
     engine.step()
     assert captured["base_url"] == "https://api.deepseek.com"
     assert captured["model"] == "deepseek-chat"
+
+
+# -- LLM resilience (empty / non-JSON / fenced responses) ----------------------
+
+
+def test_parse_json_tolerantly():
+    from world_engine.infra.llm import _try_parse_json
+
+    assert _try_parse_json("```json\n{\"thought\": \"x\"}\n```") == {"thought": "x"}
+    assert _try_parse_json("好的，这是结果：{\"thought\": \"x\", \"speech\": \"嗯\"}") == {
+        "thought": "x",
+        "speech": "嗯",
+    }
+    assert _try_parse_json("") is None
+    assert _try_parse_json("完全不是 JSON") is None
+
+
+def _fake_llm_client(tmp_path: Path, sequence: list[str]):
+    from types import SimpleNamespace
+
+    from world_engine.infra.config import EngineSettings
+    from world_engine.infra.llm import LLMClient
+    from world_engine.infra.llm_settings import LLMSettingsStore
+
+    settings = Settings(
+        llm=LLMSettings(provider="custom", base_url="http://x", model="m", api_key_env="NO_SUCH_ENV"),
+        engine=EngineSettings(db_path=tmp_path / "x.db"),
+    )
+    store = LLMSettingsStore(tmp_path / "llm.json", settings.llm)
+
+    class FakeCompletions:
+        def __init__(self):
+            self.n = 0
+
+        def create(self, **kwargs):
+            text = sequence[min(self.n, len(sequence) - 1)]
+            self.n += 1
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    client = LLMClient(store, max_retries=2, retry_delay=0)
+    client._client = FakeClient()
+    client._client_key = ("http://x", None)
+    return client, FakeChat.completions
+
+
+def test_chat_retries_empty_response(tmp_path: Path):
+    client, completions = _fake_llm_client(tmp_path, ["", '{"ok": true}'])
+    text = client.chat([{"role": "user", "content": "hi"}])
+    assert text == '{"ok": true}'
+    assert completions.n == 2
+
+
+def test_chat_json_retries_on_bad_json(tmp_path: Path):
+    client, completions = _fake_llm_client(tmp_path, ["这不是JSON", '{"thought": "好", "speech": "", "action": "点头", "memories": []}'])
+    data = client.chat_json([{"role": "user", "content": "hi"}])
+    assert data["thought"] == "好"
+    assert completions.n == 2
+
+
+def test_chat_json_raises_after_retries(tmp_path: Path):
+    import pytest
+
+    from world_engine.infra.llm import LLMError
+
+    client, _ = _fake_llm_client(tmp_path, ["完全不是JSON"])
+    with pytest.raises(LLMError):
+        client.chat_json([{"role": "user", "content": "hi"}])

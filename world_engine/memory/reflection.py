@@ -11,7 +11,8 @@ from ..infra.llm import LLMClient
 REFLECT_SYSTEM = """
 You are a sharp observer of human behavior. Reflect on a character's recent memories and
 surface high-level insights — patterns, goals, tensions, and relationships — that go beyond
-any single event. Never mention being an AI or a simulation. Write in Chinese.
+any single event. Never mention being an AI or a simulation.
+【重要】你的所有输出必须一律使用中文。
 """.strip()
 
 REFLECT_CONTRACT = """

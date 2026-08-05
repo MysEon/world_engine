@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from ..infra.config import Settings, load_settings
-from ..infra.llm import LLMClient
+from ..infra.llm import LLMClient, LLMError
 from ..infra.logging import configure_logging
 from .manager import WorldManager
 from .middleware import RequestLogMiddleware
@@ -18,6 +19,11 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None) -
     manager = WorldManager(settings, llm=llm)
     app.state.manager = manager
     app.state.llm_store = manager.llm_store
+
+    @app.exception_handler(LLMError)
+    async def llm_error_handler(request: Request, exc: LLMError):
+        return JSONResponse(status_code=502, content={"detail": str(exc)})
+
     app.add_middleware(RequestLogMiddleware)
     app.include_router(router, prefix="/api")
     return app

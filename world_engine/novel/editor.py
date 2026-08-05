@@ -10,7 +10,8 @@ EDITOR_SYSTEM = """
 You are the editor of a literary novel. Polish this chapter: smooth awkward phrasing, keep
 character voices consistent, fix continuity slips (names, timing), and make sure the chapter
 delivers its planned beat. Stay faithful to the source events — do not add new plot that did
-not happen. Output only the polished chapter text. Write in Chinese.
+not happen. Output only the polished chapter text.
+【重要】你的全部正文必须一律使用中文。
 """.strip()
 
 

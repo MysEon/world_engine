@@ -12,7 +12,8 @@ You are a master novelist and story editor. Given a story world, its characters,
 event stream of what actually happened, you must structure this material into a novel outline.
 Divide the events into chapters, give each chapter a title and a one-line summary, and shape an
 overall narrative arc with clear build-up, climax, and resolution. Do not invent events that are
-not in the stream — structure what happened, do not add to it. Write in Chinese.
+not in the stream — structure what happened, do not add to it.
+【重要】你的所有输出必须一律使用中文。
 """.strip()
 
 PLANNER_CONTRACT = """

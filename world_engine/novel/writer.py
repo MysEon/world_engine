@@ -12,6 +12,7 @@ The source material records what the characters thought, said and did; use it fo
 motivation, but the prose itself is a work of art — keep it literary and restrained, showing
 inner states through action, dialogue and detail rather than stating them flatly. Do not list
 events mechanically; turn them into narrative. Never mention being an AI.
+【重要】你的全部正文必须一律使用中文。
 """.strip()
 
 
