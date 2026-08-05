@@ -4,12 +4,14 @@ from typing import Callable
 
 from ..core.models import Chapter, WorldEvent, WorldState
 from ..infra.llm import LLMClient
+from .material import format_events
 
 WRITER_SYSTEM = """
 You are a literary Chinese novelist. Write this chapter of a novel in flowing third-person prose.
-Weave the source events into a real scene: set the atmosphere, render the characters' speech
-naturally inside quotes, show inner states subtly through action and detail rather than stating
-them flatly. Do not list events mechanically; turn them into narrative. Never mention being an AI.
+The source material records what the characters thought, said and did; use it for depth of
+motivation, but the prose itself is a work of art — keep it literary and restrained, showing
+inner states through action, dialogue and detail rather than stating them flatly. Do not list
+events mechanically; turn them into narrative. Never mention being an AI.
 """.strip()
 
 
@@ -21,13 +23,7 @@ class ChapterWriter:
         self.max_tokens = max_tokens
 
     def _material(self, chapter: Chapter, events: list[WorldEvent]) -> str:
-        material = [e for e in events if chapter.start_turn <= e.turn <= chapter.end_turn]
-        if not material:
-            return "(本章没有对应的事件素材)"
-        return "\n".join(
-            f"第{e.turn}回合 {f'[{e.actor}]' if e.actor else f'[{e.kind}]'} {e.content}"
-            for e in material
-        )
+        return format_events(events, chapter.start_turn, chapter.end_turn)
 
     def write(self, world: WorldState, chapter: Chapter, events: list[WorldEvent]) -> str:
         chars = "\n".join(

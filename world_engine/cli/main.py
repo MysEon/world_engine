@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import os
 import sys
+from pathlib import Path
 
 from ..core.models import DirectorEvent
 from ..infra.config import load_settings
@@ -21,9 +24,63 @@ HELP = """
 """.strip()
 
 
-def print_step(result) -> None:
+def print_step(result, engine=None) -> None:
     print(f"\n────── 第 {result.turn} 回合 ──────")
     print(result.narrative)
+    if result.outputs:
+        print("\n【创世神视图】")
+        for name, out in result.outputs.items():
+            print(f"· {name}")
+            if out.thought:
+                print(f"    内心: {out.thought}")
+            if out.speech:
+                print(f"    说: \"{out.speech}\"")
+            if out.action:
+                print(f"    行动: {out.action}")
+            if engine is not None:
+                new_memories = [
+                    m.content
+                    for m in engine.store.memories(engine.world_id, name)
+                    if m.turn == result.turn
+                ]
+                if new_memories:
+                    print(f"    记忆沉淀: {'；'.join(new_memories)}")
+
+
+def _load_env_key(env_name: str, env_file: Path) -> bool:
+    if not env_file.exists():
+        return False
+    for raw in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() == env_name:
+            os.environ[env_name] = value.strip()
+            return True
+    return False
+
+
+def _ensure_api_key(settings) -> None:
+    env = settings.llm.api_key_env
+    if not env:
+        return
+    if os.environ.get(env):
+        return
+    env_file = Path(".env")
+    if _load_env_key(env, env_file):
+        return
+
+    print(f"未检测到 {env}。请输入你的 API Key（输入不会显示）：")
+    key = getpass.getpass("> ").strip()
+    if not key:
+        raise SystemExit("未提供 API Key，无法继续。")
+    os.environ[env] = key
+
+    save = input("是否保存到 .env 以便下次自动加载？(y/n，默认 n): ").strip().lower()
+    if save in ("y", "yes"):
+        env_file.write_text(f"{env}={key}\n", encoding="utf-8")
+        print(f"已保存到 {env_file}（已加入 .gitignore，不会提交到仓库）")
 
 
 def main() -> None:
@@ -40,6 +97,7 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = load_settings(args.config)
+    _ensure_api_key(settings)
     engine = WorldEngine(settings, args.world)
     engine.load_world(_load_preset(args.preset))
     world = engine.world
@@ -57,7 +115,7 @@ def main() -> None:
 
         if not line:
             result = engine.step()
-            print_step(result)
+            print_step(result, engine)
             continue
 
         if line in ("quit", "exit", "q"):
@@ -72,8 +130,10 @@ def main() -> None:
             continue
 
         if line == "history":
+            kind_labels = {"thought": "内心", "speech": "说", "action": "行动", "narration": "叙述", "director": "异变"}
             for e in engine.store.events(engine.world_id, limit=12):
-                tag = e.actor if e.actor else e.kind
+                kind = kind_labels.get(e.kind, e.kind)
+                tag = f"{e.actor}·{kind}" if e.actor else kind
                 print(f"  [{e.turn}][{tag}] {e.content[:80]}")
             continue
 
@@ -83,7 +143,7 @@ def main() -> None:
             targets = [t.strip() for t in targets_raw.split(",") if t.strip()]
             event = DirectorEvent(content=content.strip(), targets=targets)
             result = engine.step(director_event=event)
-            print_step(result)
+            print_step(result, engine)
             continue
 
         if line == "outline":

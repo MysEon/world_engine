@@ -28,10 +28,12 @@ class EngineState(TypedDict, total=False):
 
 
 class StepResult:
-    def __init__(self, turn: int, narrative: str, event_log: list[str]):
+    def __init__(self, turn: int, narrative: str, event_log: list[str], outputs: dict[str, AgentOutput] | None = None):
         self.turn = turn
         self.narrative = narrative
         self.event_log = event_log
+        self.outputs = outputs or {}
+        self.thoughts = {name: out.thought for name, out in self.outputs.items() if out.thought}
 
 
 class WorldEngine:
@@ -178,6 +180,8 @@ class WorldEngine:
             self.store.add_event(self.world_id, WorldEvent(turn=turn, kind="narration", content=narrative))
         memories: list[MemoryRecord] = []
         for name, out in outputs.items():
+            if out.thought:
+                self.store.add_event(self.world_id, WorldEvent(turn=turn, kind="thought", actor=name, content=out.thought))
             if out.speech:
                 self.store.add_event(self.world_id, WorldEvent(turn=turn, kind="speech", actor=name, content=out.speech))
             self.store.add_event(self.world_id, WorldEvent(turn=turn, kind="action", actor=name, content=out.action))
@@ -204,16 +208,17 @@ class WorldEngine:
 
     def step(self, director_event: DirectorEvent | None = None) -> StepResult:
         turn = self.current_turn()
-        self.graph.invoke(
+        state = self.graph.invoke(
             {
                 "world_id": self.world_id,
                 "turn": turn,
                 "pending_event": director_event,
             }
         )
+        outputs: dict[str, AgentOutput] = state.get("outputs", {})
         event_log = [e.content for e in self.store.events(self.world_id, limit=8)]
         narrative = self.world.narrative[-1] if self.world.narrative else ""
-        return StepResult(turn=turn, narrative=narrative, event_log=event_log)
+        return StepResult(turn=turn, narrative=narrative, event_log=event_log, outputs=outputs)
 
     # -- novel production ----------------------------------------------------
 

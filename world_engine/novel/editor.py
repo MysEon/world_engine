@@ -4,6 +4,7 @@ from typing import Callable
 
 from ..core.models import Chapter, WorldEvent, WorldState
 from ..infra.llm import LLMClient
+from .material import format_events
 
 EDITOR_SYSTEM = """
 You are the editor of a literary novel. Polish this chapter: smooth awkward phrasing, keep
@@ -20,11 +21,7 @@ class ChapterEditor:
         self.llm_provider = llm_provider
 
     def edit(self, world: WorldState, chapter: Chapter, events: list[WorldEvent], draft: str) -> str:
-        material = [e for e in events if chapter.start_turn <= e.turn <= chapter.end_turn]
-        source = "\n".join(
-            f"第{e.turn}回合 {f'[{e.actor}]' if e.actor else f'[{e.kind}]'} {e.content}"
-            for e in material
-        )
+        source = format_events(events, chapter.start_turn, chapter.end_turn)
         messages = [
             {"role": "system", "content": EDITOR_SYSTEM},
             {

@@ -87,6 +87,50 @@ def test_write_time_dedup(tmp_path: Path):
     assert sum(1 for m in mems if "生面孔" in m.content) == 1
 
 
+def test_thoughts_persisted_and_returned(tmp_path: Path):
+    engine = make_engine(tmp_path)
+    result = engine.step()
+
+    assert "沈雁" in result.thoughts
+    assert result.thoughts["沈雁"]
+    events = engine.store.events("test-world", limit=None)
+    thought_events = [e for e in events if e.kind == "thought"]
+    assert any(e.actor == "沈雁" for e in thought_events)
+
+
+def test_no_cross_character_memory_leak(tmp_path: Path):
+    from world_engine.core.models import MemoryRecord
+
+    engine = make_engine(tmp_path, FakeLLM(with_memories=False))
+    engine.store.add_memories(
+        "test-world",
+        [
+            MemoryRecord(character="沈雁", content="只有沈雁知道：信鸽是冲我来的", importance=9, turn=0),
+            MemoryRecord(character="阿蛮", content="只有阿蛮知道：师父的信要送往柳城", importance=9, turn=0),
+        ],
+    )
+
+    given: dict[str, list[str]] = {}
+    for name, agent in engine.agents.items():
+        original_act = agent.act
+
+        def act(name=name, agent=agent, original_act=original_act):
+            def _inner(world, turn, perception, memories):
+                given[name] = [m.content for m in memories]
+                return original_act(world, turn, perception, memories)
+
+            return _inner
+
+        agent.act = act()
+
+    engine.step()
+
+    assert any("只有沈雁知道" in c for c in given["沈雁"])
+    assert not any("只有阿蛮知道" in c for c in given["沈雁"])
+    assert any("只有阿蛮知道" in c for c in given["阿蛮"])
+    assert not any("只有沈雁知道" in c for c in given["阿蛮"])
+
+
 class ReflectFakeLLM(FakeLLM):
     def chat_json(self, messages, **kwargs):
         if "记忆片段" in messages[-1]["content"]:
