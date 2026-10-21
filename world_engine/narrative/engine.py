@@ -217,7 +217,17 @@ class WorldEngine:
     def _reflect(self, state: EngineState) -> dict[str, Any]:
         completed_turn = self.world.turn
         for name in self.agents:
-            summary = self.reflector.run(self.store, self.world_id, name, completed_turn)
+            try:
+                summary = self.reflector.run(self.store, self.world_id, name, completed_turn)
+            except Exception as exc:  # noqa: BLE001 - reflection is best-effort
+                logger.warning(
+                    "reflect_failed",
+                    world_id=self.world_id,
+                    character=name,
+                    turn=completed_turn,
+                    error=str(exc),
+                )
+                continue
             logger.debug(
                 "reflection",
                 world_id=self.world_id,
@@ -238,15 +248,24 @@ class WorldEngine:
             turn=turn,
             director=bool(director_event),
         )
-        state = self.graph.invoke(
-            {
-                "world_id": self.world_id,
-                "turn": turn,
-                "pending_event": director_event,
-            }
-        )
+        try:
+            state = self.graph.invoke(
+                {
+                    "world_id": self.world_id,
+                    "turn": turn,
+                    "pending_event": director_event,
+                }
+            )
+        except Exception:
+            # A failed turn must not leave director events / memories behind.
+            # Only roll back when the turn did not commit (world.turn advanced
+            # in the persist node); the committed narrative stays.
+            if self.world is not None and self.world.turn != turn:
+                self.store.delete_turn(self.world_id, turn)
+                logger.warning("step_rollback", world_id=self.world_id, turn=turn)
+            raise
         outputs: dict[str, AgentOutput] = state.get("outputs", {})
-        event_log = [e.content for e in self.store.events(self.world_id, limit=8)]
+        event_log = [e.content for e in self.store.events_for_turn(self.world_id, turn)]
         narrative = self.world.narrative[-1] if self.world.narrative else ""
         logger.info(
             "step_done",
@@ -259,8 +278,8 @@ class WorldEngine:
 
     # -- novel production ----------------------------------------------------
 
-    def plan_novel(self):
-        return self.novel.plan(self.world, self.store)
+    def plan_novel(self, force: bool = False):
+        return self.novel.plan(self.world, self.store, force=force)
 
     def write_novel(self, numbers: list[int] | None = None):
         novel = self.store.load_novel(self.world_id)
@@ -271,5 +290,5 @@ class WorldEngine:
     def export_novel(self) -> str:
         novel = self.store.load_novel(self.world_id)
         if novel is None:
-            novel = self.novel.plan(self.world, self.store)
+            raise KeyError(f"世界 {self.world_id} 还没有小说，先调用 /novel/plan")
         return self.novel.export(novel)

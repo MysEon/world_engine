@@ -30,7 +30,12 @@ class NovelPipeline:
         self.writer = ChapterWriter(llm_provider, max_tokens=chapter_max_tokens)
         self.editor = ChapterEditor(llm_provider)
 
-    def plan(self, world: WorldState, store: WorldStore) -> Novel:
+    def plan(self, world: WorldState, store: WorldStore, force: bool = False) -> Novel:
+        existing = store.load_novel(world.world_id)
+        if existing is not None and not force and any(chapter.content for chapter in existing.chapters):
+            raise ValueError(
+                "已存在小说且部分章节已有正文，重新生成大纲会覆盖已写章节；确认覆盖请传 force=true"
+            )
         events = store.events(world.world_id, limit=None)
         novel = self.planner.plan(world, events)
         store.save_novel(world.world_id, novel)
@@ -50,6 +55,8 @@ class NovelPipeline:
             polished = self.editor.edit(world, chapter, events, draft)
             chapter.content = polished
             chapter.status = "edited"
+            # Persist after every chapter so a later failure keeps finished work.
+            store.save_novel(world.world_id, novel)
             logger.info(
                 "novel_chapter",
                 world_id=world.world_id,
@@ -57,7 +64,6 @@ class NovelPipeline:
                 title=chapter.title,
                 chars=len(polished),
             )
-        store.save_novel(world.world_id, novel)
         return novel
 
     def export(self, novel: Novel) -> str:

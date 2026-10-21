@@ -129,6 +129,23 @@ class WorldStore:
                 rows = list(reversed(rows))
         return [WorldEvent(**dict(r)) for r in rows]
 
+    def events_for_turn(self, world_id: str, turn: int) -> list[WorldEvent]:
+        """Every event written during one turn, in insertion order."""
+        with self._lock:
+            rows = self.conn.execute(
+                """SELECT turn, kind, actor, content, created_at FROM events
+                   WHERE world_id = ? AND turn = ? ORDER BY id""",
+                (world_id, turn),
+            ).fetchall()
+        return [WorldEvent(**dict(r)) for r in rows]
+
+    def delete_turn(self, world_id: str, turn: int) -> None:
+        """Drop everything a failed turn wrote: its events and its memories."""
+        with self._lock:
+            self.conn.execute("DELETE FROM events WHERE world_id = ? AND turn = ?", (world_id, turn))
+            self.conn.execute("DELETE FROM memories WHERE world_id = ? AND turn = ?", (world_id, turn))
+            self.conn.commit()
+
     def add_memories(self, world_id: str, records: list[MemoryRecord]) -> None:
         with self._lock:
             self.conn.executemany(

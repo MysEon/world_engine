@@ -14,5 +14,20 @@ data/
 .pytest_tmp/
 *.db
 
+# Test / tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # Secrets
 .env
+.env.*
+
+# Agent-generated reports
+.reports/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

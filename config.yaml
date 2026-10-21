@@ -21,4 +21,4 @@ server:
 
 logging:
   level: INFO
-  json: false
+  json_output: false

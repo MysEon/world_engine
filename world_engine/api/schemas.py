@@ -76,6 +76,12 @@ class WriteRequest(BaseModel):
     chapters: list[int] | None = None
 
 
+class NovelPlanRequest(BaseModel):
+    """force=true allows re-planning even when chapters already have content."""
+
+    force: bool = False
+
+
 class LLMSettingsRequest(BaseModel):
     provider: str | None = None
     base_url: str | None = None

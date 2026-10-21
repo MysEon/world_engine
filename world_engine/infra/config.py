@@ -47,14 +47,19 @@ class Settings(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
+#: The only supported providers: DeepSeek and any OpenAI-compatible endpoint
+#: (LM Studio / Ollama / other compatible gateways) via a custom base_url.
 PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "deepseek": {"base_url": "https://api.deepseek.com", "model": "deepseek-chat", "api_key_env": "DEEPSEEK_API_KEY"},
     "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini", "api_key_env": "OPENAI_API_KEY"},
-    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "openai/gpt-4o-mini", "api_key_env": "OPENROUTER_API_KEY"},
-    "ollama": {"base_url": "http://localhost:11434/v1", "model": "qwen2.5:7b", "api_key_env": ""},
-    "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "model": "gemini-2.5-flash", "api_key_env": "GEMINI_API_KEY"},
-    "qwen": {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus", "api_key_env": "DASHSCOPE_API_KEY"},
 }
+
+
+def validate_provider(provider: str) -> None:
+    """Raise ValueError for any provider outside PROVIDER_DEFAULTS."""
+    if provider not in PROVIDER_DEFAULTS:
+        supported = "、".join(PROVIDER_DEFAULTS)
+        raise ValueError(f"不支持的 provider：'{provider}'；仅支持：{supported}")
 
 
 def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
@@ -65,22 +70,20 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
 
     llm_cfg = data.get("llm", {}) or {}
     llm = LLMSettings(**llm_cfg)
+    validate_provider(llm.provider)
 
-    if not llm.base_url and llm.provider in PROVIDER_DEFAULTS:
-        defaults = PROVIDER_DEFAULTS[llm.provider]
+    defaults = PROVIDER_DEFAULTS[llm.provider]
+    if not llm.base_url:
         llm.base_url = defaults["base_url"]
-        if llm.model == "deepseek-chat" or llm_cfg.get("model") is None:
-            llm.model = defaults["model"]
-        if not llm.api_key_env or llm.api_key_env == "DEEPSEEK_API_KEY":
-            llm.api_key_env = defaults["api_key_env"]
+    if llm_cfg.get("model") is None:
+        llm.model = defaults["model"]
+    if not llm_cfg.get("api_key_env"):
+        llm.api_key_env = defaults["api_key_env"]
 
-    if not llm.api_key_env:
-        raise ValueError(f"provider '{llm.provider}' requires no API key but config is missing one; set llm.api_key_env")
-
+    base = path.resolve().parent
     engine_cfg = data.get("engine", {}) or {}
     engine = EngineSettings(**engine_cfg)
     if not engine.db_path.is_absolute():
-        base = path.resolve().parent
         engine.db_path = base / engine.db_path
 
     server_cfg = data.get("server", {}) or {}

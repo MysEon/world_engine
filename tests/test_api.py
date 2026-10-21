@@ -34,7 +34,7 @@ class FakeLLM:
         return "茶馆里雾气氤氲，一个生面孔推门而入。"
 
 
-def make_client(tmp_path: Path) -> TestClient:
+def make_client(tmp_path: Path, llm=None) -> TestClient:
     settings = Settings(
         llm=LLMSettings(provider="fake", model="fake", api_key_env="", base_url="http://x"),
         engine=EngineSettings(db_path=tmp_path / "test.db", reflect_every=99),
@@ -58,7 +58,7 @@ def make_client(tmp_path: Path) -> TestClient:
         ),
         encoding="utf-8",
     )
-    app = create_app(settings, llm=FakeLLM())
+    app = create_app(settings, llm=llm if llm is not None else FakeLLM())
     return TestClient(app)
 
 
