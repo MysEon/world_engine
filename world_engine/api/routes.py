@@ -12,6 +12,8 @@ from .manager import WorldManager
 from .schemas import (
     AgentView,
     CreateWorldRequest,
+    DirectorSuggestionView,
+    DirectorSuggestResponse,
     LLMSettingsRequest,
     LLMSettingsResponse,
     LLMTestRequest,
@@ -79,6 +81,26 @@ def step(world_id: str, request: Request, body: StepRequest | None = None):
                 AgentView(name=name, thought=out.thought, speech=out.speech, action=out.action, memories=new_memories)
             )
     return StepResponse(turn=result.turn, narrative=result.narrative, agents=agents, events=result.event_log)
+
+
+@router.post("/worlds/{world_id}/director/suggest", response_model=DirectorSuggestResponse)
+def suggest_director(world_id: str, request: Request):
+    """Second opinion for the creator: read-only, never persists a suggestion."""
+    manager = _manager(request)
+    with manager.lock(world_id):
+        engine = _existing_engine(request, world_id)
+        suggestions = engine.suggest_director_events()
+    return DirectorSuggestResponse(
+        suggestions=[
+            DirectorSuggestionView(
+                content=s.content,
+                targets=s.targets,
+                importance=s.importance,
+                reason=s.reason,
+            )
+            for s in suggestions
+        ]
+    )
 
 
 @router.get("/worlds/{world_id}/history")

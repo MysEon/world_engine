@@ -14,6 +14,7 @@ from ..infra.logging import get_logger
 from ..memory.reflection import Reflector
 from ..memory.retrieval import is_duplicate
 from ..novel.pipeline import NovelPipeline
+from .advisor import DirectorAdvisor, DirectorSuggestion
 from .director import apply_director_event, memories_for_director_event
 from .narrator import Narrator
 from .perception import build_agent_perception, build_scene
@@ -58,6 +59,7 @@ class WorldEngine:
             )
         self.llm = LLMClient(llm_store)
         self.narrator = Narrator(lambda: self.llm)
+        self.advisor = DirectorAdvisor(lambda: self.llm)
         self.world: WorldState | None = None
         self.agents: dict[str, CharacterAgent] = {}
         self.reflect_every = max(1, settings.engine.reflect_every)
@@ -275,6 +277,10 @@ class WorldEngine:
             narrative_chars=len(narrative),
         )
         return StepResult(turn=turn, narrative=narrative, event_log=event_log, outputs=outputs)
+
+    def suggest_director_events(self, count: int = 3) -> list[DirectorSuggestion]:
+        """Read-only second opinion: propose creator events, mutate nothing."""
+        return self.advisor.suggest(self.world, list(self.store.events(self.world_id, limit=20)), count=count)
 
     # -- novel production ----------------------------------------------------
 

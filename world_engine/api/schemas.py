@@ -82,6 +82,17 @@ class NovelPlanRequest(BaseModel):
     force: bool = False
 
 
+class DirectorSuggestionView(BaseModel):
+    content: str
+    targets: list[str] = Field(default_factory=list)
+    importance: int = 6
+    reason: str = ""
+
+
+class DirectorSuggestResponse(BaseModel):
+    suggestions: list[DirectorSuggestionView] = Field(default_factory=list)
+
+
 class LLMSettingsRequest(BaseModel):
     provider: str | None = None
     base_url: str | None = None
